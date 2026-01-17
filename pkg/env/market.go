@@ -8,28 +8,22 @@ import (
 
 // MarketEnv implements a market trading environment for portfolio optimization.
 type MarketEnv struct {
-	prices               []float64
-	returns              []float64
-	currentIdx           int
-	cash                 float64
-	shares               float64
-	initialValue         float64
-	startIdx             int
-	commission           float64
-	consecutiveBuys      int     // Track consecutive buy actions
-	consecutiveSells     int     // Track consecutive sell actions
-	maxConsecutiveTrades int     // Maximum allowed consecutive trades before penalty
-	tradePenalty         float64 // Penalty applied when exceeding max consecutive trades
+	prices       []float64
+	returns      []float64
+	currentIdx   int
+	cash         float64
+	shares       float64
+	initialValue float64
+	startIdx     int
+	commission   float64
 }
 
 // MarketConfig holds configuration for the market environment.
 type MarketConfig struct {
-	Prices               []float64
-	InitialCash          float64
-	MinStartIdx          int
-	Commission           float64
-	MaxConsecutiveTrades int     // Maximum consecutive trades before penalty (0 = no limit)
-	TradePenalty         float64 // Penalty applied when exceeding max consecutive trades
+	Prices      []float64
+	InitialCash float64
+	MinStartIdx int
+	Commission  float64
 }
 
 // NewMarketEnv creates a new market environment.
@@ -43,12 +37,6 @@ func NewMarketEnv(config MarketConfig) *MarketEnv {
 	if config.Commission <= 0 {
 		config.Commission = 0.002 // Default 0.2% commission
 	}
-	if config.MaxConsecutiveTrades <= 0 {
-		config.MaxConsecutiveTrades = 3 // Default: allow 3 consecutive trades before penalty
-	}
-	if config.TradePenalty <= 0 {
-		config.TradePenalty = 0.01 // Default: 1% penalty
-	}
 
 	// Calculate returns (still used for other purposes if needed)
 	returns := simpleReturns(config.Prices)
@@ -60,18 +48,14 @@ func NewMarketEnv(config MarketConfig) *MarketEnv {
 	}
 
 	return &MarketEnv{
-		prices:               config.Prices,
-		returns:              returns,
-		currentIdx:           startIdx,
-		cash:                 config.InitialCash,
-		shares:               0.0,
-		initialValue:         config.InitialCash,
-		startIdx:             startIdx,
-		commission:           config.Commission,
-		consecutiveBuys:      0,
-		consecutiveSells:     0,
-		maxConsecutiveTrades: config.MaxConsecutiveTrades,
-		tradePenalty:         config.TradePenalty,
+		prices:       config.Prices,
+		returns:      returns,
+		currentIdx:   startIdx,
+		cash:         config.InitialCash,
+		shares:       0.0,
+		initialValue: config.InitialCash,
+		startIdx:     startIdx,
+		commission:   config.Commission,
 	}
 }
 
@@ -80,8 +64,6 @@ func (e *MarketEnv) Reset() state.State {
 	e.currentIdx = e.startIdx
 	e.cash = e.initialValue
 	e.shares = 0.0
-	e.consecutiveBuys = 0
-	e.consecutiveSells = 0
 	return e.getState()
 }
 
@@ -99,10 +81,6 @@ func (e *MarketEnv) Step(action agent.Action) (next state.State, reward float64,
 	e.executeAction(action, currentPrice)
 	portfolioValueAfter := e.cash + e.shares*nextPrice
 	reward = CalculateReward(portfolioValueBefore, portfolioValueAfter)
-
-	// Apply penalty for excessive consecutive trades
-	penalty := e.calculateTradePenalty(action)
-	reward -= penalty
 
 	// Move to next time step
 	e.currentIdx++
@@ -221,38 +199,6 @@ func (e *MarketEnv) Commission() float64 {
 // InitialValue returns the initial portfolio value.
 func (e *MarketEnv) InitialValue() float64 {
 	return e.initialValue
-}
-
-// calculateTradePenalty calculates and applies penalty for excessive consecutive trades.
-// It also updates the consecutive trade counters.
-func (e *MarketEnv) calculateTradePenalty(action agent.Action) float64 {
-	penalty := 0.0
-
-	if action.IsBuy() {
-		// Increment consecutive buys, reset consecutive sells
-		e.consecutiveBuys++
-		e.consecutiveSells = 0
-
-		// Apply penalty if exceeding max consecutive trades
-		if e.consecutiveBuys > e.maxConsecutiveTrades {
-			penalty = e.tradePenalty
-		}
-	} else if action.IsSell() {
-		// Increment consecutive sells, reset consecutive buys
-		e.consecutiveSells++
-		e.consecutiveBuys = 0
-
-		// Apply penalty if exceeding max consecutive trades
-		if e.consecutiveSells > e.maxConsecutiveTrades {
-			penalty = e.tradePenalty
-		}
-	} else {
-		// ActionNothing resets both counters
-		e.consecutiveBuys = 0
-		e.consecutiveSells = 0
-	}
-
-	return penalty
 }
 
 // simpleReturns calculates simple returns from price series.
