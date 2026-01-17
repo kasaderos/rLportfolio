@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -46,51 +47,107 @@ func main() {
 
 	rng := rand.New(rand.NewSource(*seed))
 
-	// Load prices from BTC CSV file
-	prices, err := loadPricesFromCSV("data/btc.csv")
+	// Load all stock data from train.csv
+	stockData, err := loadAllStocksFromCSV("data/train.csv")
 	if err != nil {
-		fmt.Printf("Error loading prices from CSV: %v\n", err)
-		return
-	}
-	if len(prices) < minPrices {
-		fmt.Printf("Error: Need at least %d prices, got %d\n", minPrices, len(prices))
+		fmt.Printf("Error loading stocks from CSV: %v\n", err)
 		return
 	}
 
-	// Create environment
-	marketEnv := env.NewMarketEnv(env.MarketConfig{
-		Prices:      prices,
-		InitialCash: 10000.0,
-		ApproxM:     approxM,
-		ApproxN:     approxN,
-		MinStartIdx: 20,
-	})
+	if len(stockData) == 0 {
+		fmt.Printf("Error: No stock data found\n")
+		return
+	}
 
-	// Create Q-table and policy
+	fmt.Printf("Loaded %d stocks from train.csv\n", len(stockData))
+	for name, prices := range stockData {
+		fmt.Printf("  %s: %d prices\n", name, len(prices))
+	}
+
+	// Create Q-table and policy (shared across all stocks)
 	Q := agent.NewQTable(state.NumStates, agent.NumActions)
 	policy := agent.NewEpsilonGreedyPolicy(Q.Q, epsilon, rng)
 
 	// Create agent
 	rlAgent := agent.NewQLearningAgent(Q, policy, alpha, gamma)
 
-	// Create trainer
-	t := trainer.NewTrainer(marketEnv, rlAgent)
+	// Train on each stock sequentially
+	episodesPerStock := *episodeCount / len(stockData)
+	if episodesPerStock < 1 {
+		episodesPerStock = 1
+	}
 
-	fmt.Printf("Starting Q-learning training with %d prices...\n", len(prices))
-	fmt.Printf("Initial portfolio: Cash=%.2f, Shares=%.2f\n\n", marketEnv.Cash(), marketEnv.Shares())
+	fmt.Printf("\n=== Training on %d stocks ===\n", len(stockData))
+	fmt.Printf("Episodes per stock: %d\n\n", episodesPerStock)
 
-	// Train
-	t.Run(*episodeCount, 100)
+	stockNames := make([]string, 0, len(stockData))
+	for name := range stockData {
+		stockNames = append(stockNames, name)
+	}
+	// Sort for consistent ordering
+	sort.Strings(stockNames)
 
-	// Test the learned policy and get series data
-	fmt.Println("\n=== Testing Learned Policy ===")
-	portfolioSeries, actions, actionData := testPolicy(Q.Q, prices, marketEnv)
+	for _, stockName := range stockNames {
+		prices := stockData[stockName]
+		if len(prices) < minPrices {
+			fmt.Printf("Skipping %s: Need at least %d prices, got %d\n", stockName, minPrices, len(prices))
+			continue
+		}
 
-	// Save series data to data/series.csv
-	if err := plot.SaveSeriesData(prices, portfolioSeries, actions, actionData); err != nil {
-		fmt.Printf("Failed to save series: %v\n", err)
+		fmt.Printf("Training on %s (%d prices)...\n", stockName, len(prices))
+
+		// Create environment for this stock
+		marketEnv := env.NewMarketEnv(env.MarketConfig{
+			Prices:      prices,
+			InitialCash: 10000.0,
+			ApproxM:     approxM,
+			ApproxN:     approxN,
+			MinStartIdx: 20,
+			Commission:  0.002,
+		})
+
+		// Create trainer
+		t := trainer.NewTrainer(marketEnv, rlAgent)
+
+		// Train on this stock
+		t.Run(episodesPerStock, 100)
+		fmt.Printf("Completed training on %s\n\n", stockName)
+	}
+
+	// Test the learned policy on the last stock (or first stock if available)
+	var testPrices []float64
+	var testStockName string
+	if len(stockNames) > 0 {
+		testStockName = stockNames[len(stockNames)-1]
+		testPrices = stockData[testStockName]
 	} else {
-		fmt.Println("Saved series data to data/series.csv")
+		// Fallback: use first available stock
+		for name, prices := range stockData {
+			testStockName = name
+			testPrices = prices
+			break
+		}
+	}
+
+	if len(testPrices) >= minPrices {
+		fmt.Printf("\n=== Testing Learned Policy on %s ===\n", testStockName)
+		marketEnv := env.NewMarketEnv(env.MarketConfig{
+			Prices:      testPrices,
+			InitialCash: 10000.0,
+			ApproxM:     approxM,
+			ApproxN:     approxN,
+			MinStartIdx: 20,
+			Commission:  0.002,
+		})
+
+		portfolioSeries, actions, actionData := testPolicy(Q.Q, testPrices, marketEnv)
+
+		// Save series data to data/series.csv
+		if err := plot.SaveSeriesData(testPrices, portfolioSeries, actions, actionData); err != nil {
+			fmt.Printf("Failed to save series: %v\n", err)
+		} else {
+			fmt.Println("Saved series data to data/series.csv")
+		}
 	}
 
 	// Save Q-matrix to data/q_matrix.csv
@@ -221,9 +278,10 @@ func (a *testAgent) Act(s state.State) agent.Action {
 	return a.policy.Act(s)
 }
 
-// loadPricesFromCSV loads price data from a CSV file.
-// The CSV should have a header row and the Price column should be the second column (index 1).
-func loadPricesFromCSV(filename string) ([]float64, error) {
+// loadAllStocksFromCSV loads all stock price data from a CSV file.
+// Returns a map where keys are stock names and values are price arrays.
+// The CSV should have a header row with stock names (excluding Date column).
+func loadAllStocksFromCSV(filename string) (map[string][]float64, error) {
 	file, err := os.Open(filename)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file: %w", err)
@@ -240,25 +298,55 @@ func loadPricesFromCSV(filename string) ([]float64, error) {
 		return nil, fmt.Errorf("CSV file must have at least a header and one data row")
 	}
 
-	// Skip header row, start from index 1
-	prices := make([]float64, 0, len(records)-1)
+	// Parse header to find stock columns (exclude Date column)
+	header := records[0]
+	stockIndices := make(map[string]int)
+
+	for i, colName := range header {
+		colName = strings.Trim(colName, `"`)
+		// Skip Date column
+		if strings.ToLower(colName) == "date" {
+			continue
+		}
+		stockIndices[colName] = i
+	}
+
+	if len(stockIndices) == 0 {
+		return nil, fmt.Errorf("no stock columns found in CSV header")
+	}
+
+	// Initialize price arrays for each stock
+	stockData := make(map[string][]float64)
+	for stockName := range stockIndices {
+		stockData[stockName] = make([]float64, 0, len(records)-1)
+	}
+
+	// Parse data rows
 	for i := 1; i < len(records); i++ {
-		if len(records[i]) < 2 {
-			continue // Skip rows with insufficient columns
+		row := records[i]
+		if len(row) == 0 {
+			continue
 		}
-		// Price is in the second column (index 1)
-		priceStr := records[i][1]
-		// Remove commas and quotes from the price string
-		priceStr = strings.ReplaceAll(priceStr, ",", "")
-		priceStr = strings.Trim(priceStr, `"`)
-		price, err := strconv.ParseFloat(priceStr, 64)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse price at row %d: %w", i+1, err)
-		}
-		if price > 0 {
-			prices = append(prices, price)
+
+		for stockName, colIdx := range stockIndices {
+			if colIdx >= len(row) {
+				continue
+			}
+
+			priceStr := row[colIdx]
+			// Remove commas and quotes from the price string
+			priceStr = strings.ReplaceAll(priceStr, ",", "")
+			priceStr = strings.Trim(priceStr, `"`)
+			price, err := strconv.ParseFloat(priceStr, 64)
+			if err != nil {
+				// Skip invalid prices for this row/stock
+				continue
+			}
+			if price > 0 {
+				stockData[stockName] = append(stockData[stockName], price)
+			}
 		}
 	}
 
-	return prices, nil
+	return stockData, nil
 }

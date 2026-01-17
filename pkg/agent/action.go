@@ -26,6 +26,21 @@ const (
 	SellLarge = 0.5
 )
 
+// IsBuy returns true if the action is a buy action.
+func (a Action) IsBuy() bool {
+	return a == ActionBuySmall || a == ActionBuyLarge
+}
+
+// IsSell returns true if the action is a sell action.
+func (a Action) IsSell() bool {
+	return a == ActionSellSmall || a == ActionSellLarge
+}
+
+// IsTrade returns true if the action is a buy or sell (not nothing).
+func (a Action) IsTrade() bool {
+	return a.IsBuy() || a.IsSell()
+}
+
 // String returns a human-readable name for the action.
 func (a Action) String() string {
 	switch a {

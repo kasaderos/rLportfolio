@@ -8,16 +8,14 @@ import (
 	"path/filepath"
 
 	"github.com/kasaderos/rLportfolio/pkg/agent"
-	localapproximation "github.com/kasaderos/rLportfolio/pkg/local-approximation"
+	ma "github.com/kasaderos/rLportfolio/pkg/moving-average"
 	"github.com/kasaderos/rLportfolio/pkg/plot"
 	"github.com/kasaderos/rLportfolio/pkg/state"
 )
 
 const (
-	// Local approximation parameters (must match training parameters)
-	approxM     = 7
-	approxN     = 5
-	minStartIdx = 20
+	// Moving average parameters (must match training parameters)
+	minStartIdx = 60 // Need at least 60 prices for MA60
 )
 
 func main() {
@@ -324,19 +322,16 @@ func computeStateString(prices []float64, portfolioSeries []float64, idx int) st
 		return "N/A"
 	}
 
-	// Calculate returns from price history
-	returnsHistory := simpleReturns(prices[:idx+1])
-	if len(returnsHistory) < approxM+1 {
+	// Need at least 60 prices for all MAs to be available
+	if idx < 60 {
 		return "N/A"
 	}
 
-	// Local approximation
-	pred, minDist, err := localapproximation.LocalApproximation(returnsHistory, approxM, approxN)
-	if err != nil {
+	// Get moving average ordering state
+	maState := ma.GetMAStateForIndex(prices, idx)
+	if maState < 0 {
 		return "N/A"
 	}
-	expRetCat := state.GetExpRetCategory(pred)
-	minDistCat := state.GetMinDistCategory(minDist)
 
 	// Get portfolio position categories
 	// portfolioSeries now contains portfolio value (cash + price * shares) directly
@@ -362,20 +357,8 @@ func computeStateString(prices []float64, portfolioSeries []float64, idx int) st
 	cashCat := state.GetCashCategory(estimatedCash, portfolioValue)
 	sharesCat := state.GetSharesCategory(estimatedSharesValue, portfolioValue)
 
-	return fmt.Sprintf("R:%d D:%d C:%d S:%d",
-		expRetCat, minDistCat, cashCat, sharesCat)
-}
-
-// simpleReturns calculates simple returns from price series.
-func simpleReturns(prices []float64) []float64 {
-	if len(prices) < 2 {
-		return nil
-	}
-	r := make([]float64, len(prices)-1)
-	for i := 1; i < len(prices); i++ {
-		r[i-1] = prices[i]/prices[i-1] - 1.0
-	}
-	return r
+	return fmt.Sprintf("MA:%d C:%d S:%d",
+		maState, cashCat, sharesCat)
 }
 
 func formatIntArray(arr []int) string {
