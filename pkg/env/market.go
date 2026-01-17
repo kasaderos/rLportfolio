@@ -15,8 +15,6 @@ type MarketEnv struct {
 	shares               float64
 	initialValue         float64
 	startIdx             int
-	approxM              int
-	approxN              int
 	commission           float64
 	consecutiveBuys      int     // Track consecutive buy actions
 	consecutiveSells     int     // Track consecutive sell actions
@@ -28,8 +26,6 @@ type MarketEnv struct {
 type MarketConfig struct {
 	Prices               []float64
 	InitialCash          float64
-	ApproxM              int
-	ApproxN              int
 	MinStartIdx          int
 	Commission           float64
 	MaxConsecutiveTrades int     // Maximum consecutive trades before penalty (0 = no limit)
@@ -71,8 +67,6 @@ func NewMarketEnv(config MarketConfig) *MarketEnv {
 		shares:               0.0,
 		initialValue:         config.InitialCash,
 		startIdx:             startIdx,
-		approxM:              config.ApproxM,
-		approxN:              config.ApproxN,
 		commission:           config.Commission,
 		consecutiveBuys:      0,
 		consecutiveSells:     0,

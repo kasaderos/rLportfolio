@@ -26,10 +26,6 @@ const (
 
 	episodes  = 1000
 	minPrices = 50 // Minimum prices needed to start training
-
-	// Local approximation parameters
-	approxM = 7
-	approxN = 5
 )
 
 func main() {
@@ -100,8 +96,6 @@ func main() {
 		marketEnv := env.NewMarketEnv(env.MarketConfig{
 			Prices:      prices,
 			InitialCash: 10000.0,
-			ApproxM:     approxM,
-			ApproxN:     approxN,
 			MinStartIdx: 120, // Need at least 120 for MA120
 			Commission:  0.002,
 		})
@@ -134,8 +128,6 @@ func main() {
 		marketEnv := env.NewMarketEnv(env.MarketConfig{
 			Prices:      testPrices,
 			InitialCash: 10000.0,
-			ApproxM:     approxM,
-			ApproxN:     approxN,
 			MinStartIdx: 120, // Need at least 120 for MA120
 			Commission:  0.002,
 		})

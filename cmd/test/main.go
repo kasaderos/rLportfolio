@@ -13,12 +13,6 @@ import (
 	"github.com/kasaderos/rLportfolio/pkg/state"
 )
 
-const (
-	// Local approximation parameters (must match training)
-	approxM = 7
-	approxN = 5
-)
-
 func main() {
 	// Load Q-matrix from data/q_matrix.csv
 	fmt.Println("Loading Q-matrix from data/q_matrix.csv...")
@@ -46,8 +40,6 @@ func main() {
 	marketEnv := env.NewMarketEnv(env.MarketConfig{
 		Prices:      prices,
 		InitialCash: 10000.0,
-		ApproxM:     approxM,
-		ApproxN:     approxN,
 		MinStartIdx: 120,   // Need at least 120 for MA120
 		Commission:  0.002, // 2% commission
 	})
