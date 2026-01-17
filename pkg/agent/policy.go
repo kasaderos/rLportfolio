@@ -3,7 +3,7 @@ package agent
 import (
 	"math/rand"
 
-	"github.com/kasaderos/rLportfolio/pkg/rl/state"
+	"github.com/kasaderos/rLportfolio/pkg/state"
 )
 
 // Actor defines the policy interface for selecting actions.

@@ -3,8 +3,8 @@ package trainer
 import (
 	"fmt"
 
-	"github.com/kasaderos/rLportfolio/pkg/rl/agent"
-	"github.com/kasaderos/rLportfolio/pkg/rl/env"
+	"github.com/kasaderos/rLportfolio/pkg/agent"
+	"github.com/kasaderos/rLportfolio/pkg/env"
 )
 
 // Trainer runs training episodes for an RL agent.

@@ -1,6 +1,6 @@
 package agent
 
-import "github.com/kasaderos/rLportfolio/pkg/rl/state"
+import "github.com/kasaderos/rLportfolio/pkg/state"
 
 // Learner defines the interface for learning from transitions.
 type Learner interface {

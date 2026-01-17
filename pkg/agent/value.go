@@ -1,6 +1,6 @@
 package agent
 
-import "github.com/kasaderos/rLportfolio/pkg/rl/state"
+import "github.com/kasaderos/rLportfolio/pkg/state"
 
 // ValueFunction represents a value function (e.g., Q-function).
 type ValueFunction interface {

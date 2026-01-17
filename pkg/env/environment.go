@@ -1,8 +1,8 @@
 package env
 
 import (
-	"github.com/kasaderos/rLportfolio/pkg/rl/agent"
-	"github.com/kasaderos/rLportfolio/pkg/rl/state"
+	"github.com/kasaderos/rLportfolio/pkg/agent"
+	"github.com/kasaderos/rLportfolio/pkg/state"
 )
 
 // Environment defines the interface for RL environments.

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"image/color"
 
-	"github.com/kasaderos/rLportfolio/pkg/rl/agent"
+	"github.com/kasaderos/rLportfolio/pkg/agent"
 	"gonum.org/v1/plot"
 	"gonum.org/v1/plot/plotter"
 	"gonum.org/v1/plot/vg"

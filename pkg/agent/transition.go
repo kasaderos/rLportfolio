@@ -1,6 +1,6 @@
 package agent
 
-import "github.com/kasaderos/rLportfolio/pkg/rl/state"
+import "github.com/kasaderos/rLportfolio/pkg/state"
 
 // Transition represents a state-action-reward-nextState transition.
 type Transition struct {

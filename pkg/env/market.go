@@ -1,9 +1,9 @@
 package env
 
 import (
+	"github.com/kasaderos/rLportfolio/pkg/agent"
 	localapproximation "github.com/kasaderos/rLportfolio/pkg/local-approximation"
-	"github.com/kasaderos/rLportfolio/pkg/rl/agent"
-	"github.com/kasaderos/rLportfolio/pkg/rl/state"
+	"github.com/kasaderos/rLportfolio/pkg/state"
 )
 
 // MarketEnv implements a market trading environment for portfolio optimization.

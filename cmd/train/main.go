@@ -6,11 +6,11 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/kasaderos/rLportfolio/pkg/rl/agent"
-	"github.com/kasaderos/rLportfolio/pkg/rl/env"
-	"github.com/kasaderos/rLportfolio/pkg/rl/plot"
-	"github.com/kasaderos/rLportfolio/pkg/rl/state"
-	"github.com/kasaderos/rLportfolio/pkg/rl/trainer"
+	"github.com/kasaderos/rLportfolio/pkg/agent"
+	"github.com/kasaderos/rLportfolio/pkg/env"
+	"github.com/kasaderos/rLportfolio/pkg/plot"
+	"github.com/kasaderos/rLportfolio/pkg/state"
+	"github.com/kasaderos/rLportfolio/pkg/trainer"
 )
 
 const (

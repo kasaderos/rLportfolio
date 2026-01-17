@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/kasaderos/rLportfolio/pkg/rl/agent"
-	"github.com/kasaderos/rLportfolio/pkg/rl/plot"
+	"github.com/kasaderos/rLportfolio/pkg/agent"
+	"github.com/kasaderos/rLportfolio/pkg/plot"
 )
 
 func main() {
