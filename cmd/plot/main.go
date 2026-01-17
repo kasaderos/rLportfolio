@@ -8,12 +8,21 @@ import (
 	"path/filepath"
 
 	"github.com/kasaderos/rLportfolio/pkg/agent"
+	localapproximation "github.com/kasaderos/rLportfolio/pkg/local-approximation"
 	"github.com/kasaderos/rLportfolio/pkg/plot"
+	"github.com/kasaderos/rLportfolio/pkg/state"
+)
+
+const (
+	// Local approximation parameters (must match training parameters)
+	approxM     = 7
+	approxN     = 5
+	minStartIdx = 20
 )
 
 func main() {
 	// Load series data
-	prices, cashSeries, actions, err := plot.LoadSeriesData()
+	prices, portfolioSeries, actions, err := plot.LoadSeriesData()
 	if err != nil {
 		log.Fatalf("Failed to load series data: %v", err)
 	}
@@ -22,10 +31,10 @@ func main() {
 	fmt.Printf("Actions: %d non-empty actions\n", countNonEmptyActions(actions))
 
 	// Create HTML with interactive Plotly chart
-	html := generateInteractivePlot(prices, cashSeries, actions)
+	html := generateInteractivePlot(prices, portfolioSeries, actions)
 
 	// Save HTML file
-	htmlPath := "rl/plot/plot.html"
+	htmlPath := "templates/plot.html"
 	if err := os.MkdirAll(filepath.Dir(htmlPath), 0755); err != nil {
 		log.Fatalf("Failed to create directory: %v", err)
 	}
@@ -61,13 +70,12 @@ func countNonEmptyActions(actions []int) int {
 	return count
 }
 
-func generateInteractivePlot(prices []float64, cashSeries []float64, actions []int) string {
+func generateInteractivePlot(prices []float64, portfolioSeries []float64, actions []int) string {
 	// Prepare data for JavaScript
 	pricesJS := formatFloatArray(prices)
-	cashJS := formatFloatArray(cashSeries)
 
-	// Prepare action markers
-	actionMarkers := prepareActionMarkers(prices, actions)
+	// Prepare action markers with state information
+	actionMarkers := prepareActionMarkers(prices, portfolioSeries, actions)
 
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html>
@@ -117,7 +125,6 @@ func generateInteractivePlot(prices []float64, cashSeries []float64, actions []i
             <h3>Legend:</h3>
             <ul>
                 <li><span style="color: #1f77b4;">Blue line:</span> Price series</li>
-                <li><span style="color: #ff7f0e;">Orange line:</span> Cash series</li>
                 <li><span style="color: #2ca02c;">Green markers:</span> Buy actions</li>
                 <li><span style="color: #d62728;">Red markers:</span> Sell actions</li>
             </ul>
@@ -127,7 +134,6 @@ func generateInteractivePlot(prices []float64, cashSeries []float64, actions []i
     <script>
         // Price data
         var prices = %s;
-        var cashSeries = %s;
         var actionMarkers = %s;
         
         var time = [];
@@ -149,24 +155,11 @@ func generateInteractivePlot(prices []float64, cashSeries []float64, actions []i
             yaxis: 'y'
         };
 
-        // Create cash trace
-        var cashTrace = {
-            x: time,
-            y: cashSeries,
-            type: 'scatter',
-            mode: 'lines',
-            name: 'Cash',
-            line: {
-                color: '#ff7f0e',
-                width: 2
-            },
-            yaxis: 'y2'
-        };
-
         // Create buy action markers
         var buyMarkers = {
             x: actionMarkers.buy.x,
             y: actionMarkers.buy.y,
+            text: actionMarkers.buy.labels,
             type: 'scatter',
             mode: 'markers',
             name: 'Buy Actions',
@@ -180,13 +173,15 @@ func generateInteractivePlot(prices []float64, cashSeries []float64, actions []i
                 }
             },
             yaxis: 'y',
-            hovertemplate: '<b>Buy Action</b><br>Time: %%{x}<br>Price: %%{y:.2f}<extra></extra>'
+            hovertemplate: '<b>%%{text}</b><br>Time: %%{x}<br>Price: %%{y:.2f}<br>State: %%{customdata}<extra></extra>',
+            customdata: actionMarkers.buy.states
         };
 
         // Create sell action markers
         var sellMarkers = {
             x: actionMarkers.sell.x,
             y: actionMarkers.sell.y,
+            text: actionMarkers.sell.labels,
             type: 'scatter',
             mode: 'markers',
             name: 'Sell Actions',
@@ -200,14 +195,15 @@ func generateInteractivePlot(prices []float64, cashSeries []float64, actions []i
                 }
             },
             yaxis: 'y',
-            hovertemplate: '<b>Sell Action</b><br>Time: %%{x}<br>Price: %%{y:.2f}<extra></extra>'
+            hovertemplate: '<b>%%{text}</b><br>Time: %%{x}<br>Price: %%{y:.2f}<br>State: %%{customdata}<extra></extra>',
+            customdata: actionMarkers.sell.states
         };
 
-        var data = [priceTrace, cashTrace, buyMarkers, sellMarkers];
+        var data = [priceTrace, buyMarkers, sellMarkers];
 
         var layout = {
             title: {
-                text: 'RL Portfolio Trading - Price, Cash, and Actions',
+                text: 'RL Portfolio Trading - Price and Actions',
                 font: {
                     size: 18
                 }
@@ -222,12 +218,6 @@ func generateInteractivePlot(prices []float64, cashSeries []float64, actions []i
                 side: 'left',
                 showgrid: true,
                 gridcolor: '#e0e0e0'
-            },
-            yaxis2: {
-                title: 'Cash',
-                side: 'right',
-                overlaying: 'y',
-                showgrid: false
             },
             hovermode: 'closest',
             legend: {
@@ -249,7 +239,7 @@ func generateInteractivePlot(prices []float64, cashSeries []float64, actions []i
         Plotly.newPlot('plot', data, layout, config);
     </script>
 </body>
-</html>`, pricesJS, cashJS, actionMarkers)
+</html>`, pricesJS, actionMarkers)
 }
 
 func formatFloatArray(arr []float64) string {
@@ -267,46 +257,125 @@ func formatFloatArray(arr []float64) string {
 	return result
 }
 
-func prepareActionMarkers(prices []float64, actions []int) string {
+func prepareActionMarkers(prices []float64, portfolioSeries []float64, actions []int) string {
 	var buyX []int
 	var buyPrices []float64
+	var buyLabels []string
+	var buyStates []string
 	var sellX []int
 	var sellPrices []float64
+	var sellLabels []string
+	var sellStates []string
 
 	for i, action := range actions {
-		if i >= len(prices) {
+		if i >= len(prices) || i >= len(portfolioSeries) {
 			break
 		}
 		if action < 0 {
 			continue
 		}
 
+		// Compute state for this point
+		stateStr := computeStateString(prices, portfolioSeries, i)
+
 		actionType := agent.Action(action)
-		if actionType == agent.ActionBuySmall || actionType == agent.ActionBuyMedium || actionType == agent.ActionBuyLarge {
+		if actionType == agent.ActionBuySmall || actionType == agent.ActionBuyLarge {
 			buyX = append(buyX, i)
 			buyPrices = append(buyPrices, prices[i])
-		} else if actionType == agent.ActionSellSmall || actionType == agent.ActionSellMedium || actionType == agent.ActionSellLarge {
+			buyLabels = append(buyLabels, actionType.String())
+			buyStates = append(buyStates, stateStr)
+		} else if actionType == agent.ActionSellSmall || actionType == agent.ActionSellLarge {
 			sellX = append(sellX, i)
 			sellPrices = append(sellPrices, prices[i])
+			sellLabels = append(sellLabels, actionType.String())
+			sellStates = append(sellStates, stateStr)
 		}
 	}
 
 	// Format as JavaScript object
 	buyXJS := formatIntArray(buyX)
 	buyYJS := formatFloatArray(buyPrices)
+	buyLabelsJS := formatStringArray(buyLabels)
+	buyStatesJS := formatStringArray(buyStates)
 	sellXJS := formatIntArray(sellX)
 	sellYJS := formatFloatArray(sellPrices)
+	sellLabelsJS := formatStringArray(sellLabels)
+	sellStatesJS := formatStringArray(sellStates)
 
 	return fmt.Sprintf(`{
         "buy": {
             "x": %s,
-            "y": %s
+            "y": %s,
+            "labels": %s,
+            "states": %s
         },
         "sell": {
             "x": %s,
-            "y": %s
+            "y": %s,
+            "labels": %s,
+            "states": %s
         }
-    }`, buyXJS, buyYJS, sellXJS, sellYJS)
+    }`, buyXJS, buyYJS, buyLabelsJS, buyStatesJS, sellXJS, sellYJS, sellLabelsJS, sellStatesJS)
+}
+
+// computeStateString computes the state string for a given point in the series.
+func computeStateString(prices []float64, portfolioSeries []float64, idx int) string {
+	if idx < minStartIdx || idx >= len(prices) {
+		return "N/A"
+	}
+
+	// Calculate returns from price history
+	returnsHistory := simpleReturns(prices[:idx+1])
+	if len(returnsHistory) < approxM+1 {
+		return "N/A"
+	}
+
+	// Local approximation
+	pred, minDist, err := localapproximation.LocalApproximation(returnsHistory, approxM, approxN)
+	if err != nil {
+		return "N/A"
+	}
+	expRetCat := state.GetExpRetCategory(pred)
+	minDistCat := state.GetMinDistCategory(minDist)
+
+	// Get portfolio position categories
+	// portfolioSeries now contains portfolio value (cash + price * shares) directly
+	portfolioValue := portfolioSeries[idx]
+
+	// Estimate cash and shares from portfolio value
+	// This is approximate but gives reasonable state categorization
+	// We estimate that cash is roughly proportional to portfolio value
+	// and shares value is the remainder
+	initialPortfolioValue := portfolioSeries[0]
+	if initialPortfolioValue <= 0 {
+		initialPortfolioValue = 10000.0 // Default estimate
+	}
+
+	// Rough estimate: assume cash is a portion of portfolio value
+	// This is an approximation since we don't have exact cash/shares breakdown
+	estimatedCash := portfolioValue * 0.5 // Conservative estimate
+	estimatedSharesValue := portfolioValue - estimatedCash
+	if portfolioValue <= 0 {
+		portfolioValue = 1.0 // Avoid division by zero
+	}
+
+	cashCat := state.GetCashCategory(estimatedCash, portfolioValue)
+	sharesCat := state.GetSharesCategory(estimatedSharesValue, portfolioValue)
+
+	return fmt.Sprintf("R:%d D:%d C:%d S:%d",
+		expRetCat, minDistCat, cashCat, sharesCat)
+}
+
+// simpleReturns calculates simple returns from price series.
+func simpleReturns(prices []float64) []float64 {
+	if len(prices) < 2 {
+		return nil
+	}
+	r := make([]float64, len(prices)-1)
+	for i := 1; i < len(prices); i++ {
+		r[i-1] = prices[i]/prices[i-1] - 1.0
+	}
+	return r
 }
 
 func formatIntArray(arr []int) string {
@@ -319,6 +388,21 @@ func formatIntArray(arr []int) string {
 			result += ","
 		}
 		result += fmt.Sprintf("%d", v)
+	}
+	result += "]"
+	return result
+}
+
+func formatStringArray(arr []string) string {
+	if len(arr) == 0 {
+		return "[]"
+	}
+	result := "["
+	for i, v := range arr {
+		if i > 0 {
+			result += ","
+		}
+		result += fmt.Sprintf(`"%s"`, v)
 	}
 	result += "]"
 	return result

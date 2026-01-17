@@ -36,10 +36,8 @@ func SavePlots(prices []float64, cashSeries []float64, actions []int) error {
 
 	for _, action := range []int{
 		int(agent.ActionBuySmall),
-		int(agent.ActionBuyMedium),
 		int(agent.ActionBuyLarge),
 		int(agent.ActionSellSmall),
-		int(agent.ActionSellMedium),
 		int(agent.ActionSellLarge),
 	} {
 		points := make(plotter.XYs, 0)
@@ -90,14 +88,10 @@ func actionColorRGBA(action int) color.RGBA {
 	switch action {
 	case int(agent.ActionBuySmall):
 		return color.RGBA{R: 141, G: 223, B: 141, A: 255}
-	case int(agent.ActionBuyMedium):
-		return color.RGBA{R: 60, G: 180, B: 75, A: 255}
 	case int(agent.ActionBuyLarge):
 		return color.RGBA{R: 15, G: 125, B: 15, A: 255}
 	case int(agent.ActionSellSmall):
 		return color.RGBA{R: 255, G: 153, B: 153, A: 255}
-	case int(agent.ActionSellMedium):
-		return color.RGBA{R: 231, G: 76, B: 60, A: 255}
 	case int(agent.ActionSellLarge):
 		return color.RGBA{R: 177, G: 18, B: 38, A: 255}
 	default:

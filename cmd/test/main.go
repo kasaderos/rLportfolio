@@ -2,103 +2,70 @@ package main
 
 import (
 	"encoding/csv"
-	"flag"
 	"fmt"
-	"math/rand"
 	"os"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/kasaderos/rLportfolio/pkg/agent"
 	"github.com/kasaderos/rLportfolio/pkg/env"
 	"github.com/kasaderos/rLportfolio/pkg/plot"
 	"github.com/kasaderos/rLportfolio/pkg/state"
-	"github.com/kasaderos/rLportfolio/pkg/trainer"
 )
 
 const (
-	// Q-learning parameters
-	alpha   = 0.1
-	gamma   = 0.95
-	epsilon = 0.1
-
-	episodes  = 1000
-	minPrices = 50 // Minimum prices needed to start training
-
-	// Local approximation parameters
+	// Local approximation parameters (must match training)
 	approxM = 7
 	approxN = 5
 )
 
 func main() {
-	seed := flag.Int64("seed", time.Now().UnixNano(), "random seed")
-	seriesLength := flag.Int("series-length", 1000, "series length")
-	episodeCount := flag.Int("episode-count", 0, "episode count")
-	flag.Parse()
-
-	if *episodeCount <= 0 {
-		*episodeCount = episodes
-	}
-	if *seriesLength <= 0 {
-		*seriesLength = 1000
-	}
-
-	rng := rand.New(rand.NewSource(*seed))
-
-	// Load prices from BTC CSV file
-	prices, err := loadPricesFromCSV("data/btc.csv")
+	// Load Q-matrix from data/q_matrix.csv
+	fmt.Println("Loading Q-matrix from data/q_matrix.csv...")
+	Q, err := plot.LoadQMatrixData()
 	if err != nil {
-		fmt.Printf("Error loading prices from CSV: %v\n", err)
+		fmt.Printf("Error loading Q-matrix: %v\n", err)
 		return
 	}
-	if len(prices) < minPrices {
-		fmt.Printf("Error: Need at least %d prices, got %d\n", minPrices, len(prices))
-		return
-	}
+	fmt.Printf("Loaded Q-matrix with %d states and %d actions\n", len(Q), len(Q[0]))
 
-	// Create environment
+	// Load test prices from data/test.csv
+	fmt.Println("\nLoading test prices from data/test.csv...")
+	prices, err := loadTestPricesFromCSV("data/test.csv")
+	if err != nil {
+		fmt.Printf("Error loading test prices: %v\n", err)
+		return
+	}
+	if len(prices) < 50 {
+		fmt.Printf("Error: Need at least 50 prices, got %d\n", len(prices))
+		return
+	}
+	fmt.Printf("Loaded %d test prices\n", len(prices))
+
+	// Create market environment with test prices
 	marketEnv := env.NewMarketEnv(env.MarketConfig{
 		Prices:      prices,
 		InitialCash: 10000.0,
 		ApproxM:     approxM,
 		ApproxN:     approxN,
 		MinStartIdx: 20,
+		Commission:  0.002, // 2% commission
 	})
 
-	// Create Q-table and policy
-	Q := agent.NewQTable(state.NumStates, agent.NumActions)
-	policy := agent.NewEpsilonGreedyPolicy(Q.Q, epsilon, rng)
-
-	// Create agent
-	rlAgent := agent.NewQLearningAgent(Q, policy, alpha, gamma)
-
-	// Create trainer
-	t := trainer.NewTrainer(marketEnv, rlAgent)
-
-	fmt.Printf("Starting Q-learning training with %d prices...\n", len(prices))
 	fmt.Printf("Initial portfolio: Cash=%.2f, Shares=%.2f\n\n", marketEnv.Cash(), marketEnv.Shares())
 
-	// Train
-	t.Run(*episodeCount, 100)
+	// Test the learned policy on test data
+	fmt.Println("=== Testing Learned Policy on Test Data ===")
+	portfolioSeries, actions, actionData := testPolicy(Q, prices, marketEnv)
 
-	// Test the learned policy and get series data
-	fmt.Println("\n=== Testing Learned Policy ===")
-	portfolioSeries, actions, actionData := testPolicy(Q.Q, prices, marketEnv)
-
-	// Save series data to data/series.csv
-	if err := plot.SaveSeriesData(prices, portfolioSeries, actions, actionData); err != nil {
-		fmt.Printf("Failed to save series: %v\n", err)
-	} else {
-		fmt.Println("Saved series data to data/series.csv")
+	// Save test series data to data/test_series.csv
+	fmt.Println("\nSaving test results to data/test_series.csv...")
+	if err := plot.SaveSeriesDataToFile(prices, portfolioSeries, actions, actionData, "data/test_series.csv"); err != nil {
+		fmt.Printf("Failed to save test series: %v\n", err)
+		return
 	}
 
-	// Save Q-matrix to data/q_matrix.csv
-	if err := plot.SaveQMatrixData(Q.Q); err != nil {
-		fmt.Printf("Failed to save Q matrix: %v\n", err)
-	} else {
-		fmt.Println("Saved Q matrix to data/q_matrix.csv")
-	}
+	fmt.Println("Test series data saved to data/test_series.csv")
 }
 
 // testPolicy tests the learned policy on the price data and returns portfolio value series, actions, and action data.
@@ -175,6 +142,15 @@ func testPolicy(Q [][]float64, prices []float64, marketEnv *env.MarketEnv) ([]fl
 	return portfolioSeries, actions, actionData
 }
 
+// testAgent is a simple agent that only acts (for testing).
+type testAgent struct {
+	policy agent.Actor
+}
+
+func (a *testAgent) Act(s state.State) agent.Action {
+	return a.policy.Act(s)
+}
+
 // calculateActionAmountsAndCommission calculates the amount of shares bought or sold and commission paid for a given action.
 func calculateActionAmountsAndCommission(action agent.Action, cash, shares, price, commission float64) (amountBought, amountSold, commissionPaid float64) {
 	switch action {
@@ -212,18 +188,10 @@ func calculateActionAmountsAndCommission(action agent.Action, cash, shares, pric
 	return amountBought, amountSold, commissionPaid
 }
 
-// testAgent is a simple agent that only acts (for testing).
-type testAgent struct {
-	policy agent.Actor
-}
-
-func (a *testAgent) Act(s state.State) agent.Action {
-	return a.policy.Act(s)
-}
-
-// loadPricesFromCSV loads price data from a CSV file.
-// The CSV should have a header row and the Price column should be the second column (index 1).
-func loadPricesFromCSV(filename string) ([]float64, error) {
+// loadTestPricesFromCSV loads price data from test.csv file.
+// The CSV has columns: MSFT, IBM, SBUX, AAPL, GSPC, Date
+// We'll use GSPC (S&P 500 index) column (index 4) as the price series.
+func loadTestPricesFromCSV(filename string) ([]float64, error) {
 	file, err := os.Open(filename)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file: %w", err)
@@ -240,14 +208,21 @@ func loadPricesFromCSV(filename string) ([]float64, error) {
 		return nil, fmt.Errorf("CSV file must have at least a header and one data row")
 	}
 
+	// GSPC is in column index 4 (5th column)
+	gspcColIdx := 4
+	if len(records[0]) <= gspcColIdx {
+		return nil, fmt.Errorf("CSV file must have at least 5 columns")
+	}
+
 	// Skip header row, start from index 1
 	prices := make([]float64, 0, len(records)-1)
 	for i := 1; i < len(records); i++ {
-		if len(records[i]) < 2 {
+		if len(records[i]) <= gspcColIdx {
 			continue // Skip rows with insufficient columns
 		}
-		// Price is in the second column (index 1)
-		priceStr := records[i][1]
+
+		// Get GSPC price (index 4)
+		priceStr := records[i][gspcColIdx]
 		// Remove commas and quotes from the price string
 		priceStr = strings.ReplaceAll(priceStr, ",", "")
 		priceStr = strings.Trim(priceStr, `"`)

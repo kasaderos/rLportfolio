@@ -1,10 +1,10 @@
 package localapproximation
 
 import (
+	"container/heap"
 	"errors"
 	"math"
 	"slices"
-	"sort"
 )
 
 // Error definitions
@@ -16,6 +16,12 @@ var (
 	ErrInsufficientHistoricalData = errors.New("insufficient historical data to find patterns")
 	ErrNoPatternsFound            = errors.New("no historical patterns found")
 )
+
+// neighbor stores distance and position information for k-NN search
+type neighbor struct {
+	distance float64
+	position int // position where the window ends (i in the algorithm)
+}
 
 // LocalApproximation implements the k-Nearest Neighbors (k-NN) Local Approximation Method (LAM).
 // It finds similar historical patterns using L2 distance and uses their next values for prediction.
@@ -60,13 +66,11 @@ func LocalApproximation(returns []float64, m int, n int) (float64, float64, erro
 		return 0, inf, ErrInsufficientHistoricalData
 	}
 
-	// Type to store distance and position
-	type neighbor struct {
-		distance float64
-		position int // position where the window ends (i in the algorithm)
-	}
-
-	var neighbors []neighbor
+	// Use a max-heap to keep only the n nearest neighbors
+	// This avoids storing and sorting all neighbors, reducing memory and time complexity
+	// Max-heap implementation (largest distance at root)
+	neighborHeap := make(neighborMaxHeap, 0, n+1)
+	heap.Init(&neighborHeap)
 
 	// Slide through historical data to find similar windows
 	for i := minStart; i <= maxStart; i++ {
@@ -82,35 +86,51 @@ func LocalApproximation(returns []float64, m int, n int) (float64, float64, erro
 		}
 		distance := math.Sqrt(sumSquaredDiff)
 
-		neighbors = append(neighbors, neighbor{
-			distance: distance,
-			position: i,
-		})
+		// Add to heap if we have space or if this is closer than the farthest neighbor
+		if neighborHeap.Len() < n {
+			heap.Push(&neighborHeap, neighbor{
+				distance: distance,
+				position: i,
+			})
+		} else if distance < neighborHeap[0].distance {
+			// Replace the farthest neighbor with this closer one
+			neighborHeap[0] = neighbor{
+				distance: distance,
+				position: i,
+			}
+			heap.Fix(&neighborHeap, 0)
+		}
 	}
 
-	if len(neighbors) == 0 {
+	if neighborHeap.Len() == 0 {
 		return 0, inf, ErrNoPatternsFound
 	}
 
-	// Sort by distance (smallest first)
-	sort.Slice(neighbors, func(i, j int) bool {
-		return neighbors[i].distance < neighbors[j].distance
-	})
-
-	// Select n nearest neighbors
-	numNeighbors := n
-	if numNeighbors > len(neighbors) {
-		numNeighbors = len(neighbors)
-	}
-
-	selectedNeighbors := neighbors[:numNeighbors]
-
-	// Extract distances for return
+	// Extract neighbors from heap and sort by distance (smallest first)
+	// Since we only have n elements, this is O(n log n) instead of O(k log k)
+	numNeighbors := neighborHeap.Len()
 	distances := make([]float64, numNeighbors)
 	nextValues := make([]float64, numNeighbors)
 
-	// Get next p-th element after each neighbor window
-	for i, neighbor := range selectedNeighbors {
+	// Pop all neighbors from heap and collect them
+	neighbors := make([]neighbor, 0, numNeighbors)
+	for neighborHeap.Len() > 0 {
+		neighbors = append(neighbors, heap.Pop(&neighborHeap).(neighbor))
+	}
+
+	// Sort by distance (smallest first) - only n elements, so this is fast
+	slices.SortFunc(neighbors, func(a, b neighbor) int {
+		if a.distance < b.distance {
+			return -1
+		}
+		if a.distance > b.distance {
+			return 1
+		}
+		return 0
+	})
+
+	// Extract distances and next values
+	for i, neighbor := range neighbors {
 		distances[i] = neighbor.distance
 		// Position i ends the window, so next p-th element is at position i + p
 		nextValues[i] = returns[neighbor.position+p]
@@ -130,4 +150,23 @@ func LocalApproximation(returns []float64, m int, n int) (float64, float64, erro
 	prediction := weightedSum / weightSum
 
 	return prediction, slices.Min(distances), nil
+}
+
+// neighborMaxHeap implements a max-heap for neighbors (largest distance at root)
+type neighborMaxHeap []neighbor
+
+func (h neighborMaxHeap) Len() int           { return len(h) }
+func (h neighborMaxHeap) Less(i, j int) bool { return h[i].distance > h[j].distance } // Max-heap: larger distance is "less"
+func (h neighborMaxHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+
+func (h *neighborMaxHeap) Push(x any) {
+	*h = append(*h, x.(neighbor))
+}
+
+func (h *neighborMaxHeap) Pop() any {
+	old := *h
+	n := len(old)
+	x := old[n-1]
+	*h = old[0 : n-1]
+	return x
 }

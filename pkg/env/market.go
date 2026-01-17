@@ -2,7 +2,7 @@ package env
 
 import (
 	"github.com/kasaderos/rLportfolio/pkg/agent"
-	localapproximation "github.com/kasaderos/rLportfolio/pkg/local-approximation"
+	la1 "github.com/kasaderos/rLportfolio/pkg/local-approximation"
 	"github.com/kasaderos/rLportfolio/pkg/state"
 )
 
@@ -15,21 +15,19 @@ type MarketEnv struct {
 	shares       float64
 	initialValue float64
 	startIdx     int
-	approxM1     int
-	approxN1     int
-	approxM2     int
-	approxN2     int
+	approxM      int
+	approxN      int
+	commission   float64
 }
 
 // MarketConfig holds configuration for the market environment.
 type MarketConfig struct {
 	Prices      []float64
 	InitialCash float64
-	ApproxM1    int
-	ApproxN1    int
-	ApproxM2    int
-	ApproxN2    int
+	ApproxM     int
+	ApproxN     int
 	MinStartIdx int
+	Commission  float64
 }
 
 // NewMarketEnv creates a new market environment.
@@ -40,12 +38,15 @@ func NewMarketEnv(config MarketConfig) *MarketEnv {
 	if config.MinStartIdx < 1 {
 		config.MinStartIdx = 20
 	}
+	if config.Commission <= 0 {
+		config.Commission = 0.002 // Default 0.2% commission
+	}
 
 	// Calculate returns
 	returns := simpleReturns(config.Prices)
 
 	// Determine start index (need enough history for local approximation)
-	startIdx := config.ApproxM2 + 1
+	startIdx := config.ApproxM + 1
 	if startIdx < config.MinStartIdx {
 		startIdx = config.MinStartIdx
 	}
@@ -58,10 +59,9 @@ func NewMarketEnv(config MarketConfig) *MarketEnv {
 		shares:       0.0,
 		initialValue: config.InitialCash,
 		startIdx:     startIdx,
-		approxM1:     config.ApproxM1,
-		approxN1:     config.ApproxN1,
-		approxM2:     config.ApproxM2,
-		approxN2:     config.ApproxN2,
+		approxM:      config.ApproxM,
+		approxN:      config.ApproxN,
+		commission:   config.Commission,
 	}
 }
 
@@ -100,7 +100,7 @@ func (e *MarketEnv) Step(action agent.Action) (next state.State, reward float64,
 	return next, reward, done
 }
 
-// getState computes the current state using local approximation.
+// getState computes the current state using local approximation and portfolio position.
 func (e *MarketEnv) getState() state.State {
 	if e.currentIdx < e.startIdx || e.currentIdx >= len(e.prices) {
 		// Return a default state if we don't have enough data
@@ -109,27 +109,26 @@ func (e *MarketEnv) getState() state.State {
 
 	priceHistory := e.prices[:e.currentIdx+1]
 	returnsHistory := simpleReturns(priceHistory)
-	if len(returnsHistory) < e.approxM2+1 {
+	if len(returnsHistory) < e.approxM+1 {
 		return state.NewState(0, 0, 0, 0)
 	}
 
-	// Local approximation call 1
-	pred1, minDist1, err := localapproximation.LocalApproximation(returnsHistory, e.approxM1, e.approxN1)
+	// Local approximation
+	pred, minDist, err := la1.LocalApproximation(returnsHistory, e.approxM, e.approxN)
 	if err != nil {
 		return state.NewState(0, 0, 0, 0)
 	}
-	expRetCat1 := state.GetExpRetCategory(pred1)
-	minDistCat1 := state.GetMinDistCategory(minDist1)
+	expRetCat := state.GetExpRetCategory(pred)
+	minDistCat := state.GetMinDistCategory(minDist)
 
-	// Local approximation call 2
-	pred2, minDist2, err := localapproximation.LocalApproximation(returnsHistory, e.approxM2, e.approxN2)
-	if err != nil {
-		return state.NewState(0, 0, 0, 0)
-	}
-	expRetCat2 := state.GetExpRetCategory(pred2)
-	minDistCat2 := state.GetMinDistCategory(minDist2)
+	// Get portfolio position categories
+	currentPrice := e.prices[e.currentIdx]
+	portfolioValue := e.cash + e.shares*currentPrice
+	sharesValue := e.shares * currentPrice
+	cashCat := state.GetCashCategory(e.cash, portfolioValue)
+	sharesCat := state.GetSharesCategory(sharesValue, portfolioValue)
 
-	return state.NewState(expRetCat1, minDistCat1, expRetCat2, minDistCat2)
+	return state.NewState(expRetCat, minDistCat, cashCat, sharesCat)
 }
 
 // executeAction executes the action and updates cash and shares.
@@ -139,27 +138,33 @@ func (e *MarketEnv) executeAction(action agent.Action, price float64) {
 		// No action
 	case agent.ActionBuySmall:
 		cost := e.cash * agent.BuySmall
+		commissionCost := cost * e.commission
 		e.cash -= cost
-		e.shares += cost / price
-	case agent.ActionBuyMedium:
-		cost := e.cash * agent.BuyMedium
-		e.cash -= cost
-		e.shares += cost / price
+		e.shares += (cost - commissionCost) / price
 	case agent.ActionBuyLarge:
 		cost := e.cash * agent.BuyLarge
+		commissionCost := cost * e.commission
 		e.cash -= cost
-		e.shares += cost / price
+		e.shares += (cost - commissionCost) / price
 	case agent.ActionSellSmall:
+		if e.shares <= 0 {
+			// Cannot sell if no shares available
+			return
+		}
 		sellShares := e.shares * agent.SellSmall
-		e.cash += sellShares * price
-		e.shares -= sellShares
-	case agent.ActionSellMedium:
-		sellShares := e.shares * agent.SellMedium
-		e.cash += sellShares * price
+		proceeds := sellShares * price
+		commissionCost := proceeds * e.commission
+		e.cash += proceeds - commissionCost
 		e.shares -= sellShares
 	case agent.ActionSellLarge:
+		if e.shares <= 0 {
+			// Cannot sell if no shares available
+			return
+		}
 		sellShares := e.shares * agent.SellLarge
-		e.cash += sellShares * price
+		proceeds := sellShares * price
+		commissionCost := proceeds * e.commission
+		e.cash += proceeds - commissionCost
 		e.shares -= sellShares
 	}
 }
@@ -188,6 +193,16 @@ func (e *MarketEnv) CurrentPrice() float64 {
 		return 0.0
 	}
 	return e.prices[e.currentIdx]
+}
+
+// CurrentIdx returns the current price index.
+func (e *MarketEnv) CurrentIdx() int {
+	return e.currentIdx
+}
+
+// Commission returns the commission rate.
+func (e *MarketEnv) Commission() float64 {
+	return e.commission
 }
 
 // InitialValue returns the initial portfolio value.

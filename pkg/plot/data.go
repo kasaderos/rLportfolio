@@ -8,16 +8,34 @@ import (
 	"strconv"
 )
 
-// SaveSeriesData saves all series data to a CSV file in rl/plot/data directory.
-func SaveSeriesData(prices []float64, cashSeries []float64, actions []int) error {
-	// Create rl/plot/data directory if it doesn't exist
-	dir := "rl/plot/data"
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("failed to create directory %s: %w", dir, err)
+// ActionData represents action information for saving to CSV.
+type ActionData struct {
+	ActionName   string
+	AmountBought float64
+	AmountSold   float64
+	Cash         float64
+	Shares       float64
+	Commission   float64
+}
+
+// SaveSeriesData saves all series data to a CSV file in data directory.
+// The portfolioSeries should contain portfolio values (cash + price * shares) for each time step.
+func SaveSeriesData(prices []float64, portfolioSeries []float64, actions []int, actionData []ActionData) error {
+	return SaveSeriesDataToFile(prices, portfolioSeries, actions, actionData, "data/series.csv")
+}
+
+// SaveSeriesDataToFile saves all series data to a specified CSV file.
+// The portfolioSeries should contain portfolio values (cash + price * shares) for each time step.
+func SaveSeriesDataToFile(prices []float64, portfolioSeries []float64, actions []int, actionData []ActionData, filename string) error {
+	// Create directory if it doesn't exist
+	dir := filepath.Dir(filename)
+	if dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("failed to create directory %s: %w", dir, err)
+		}
 	}
 
-	filepath := filepath.Join(dir, "series.csv")
-	file, err := os.Create(filepath)
+	file, err := os.Create(filename)
 	if err != nil {
 		return fmt.Errorf("failed to create file: %w", err)
 	}
@@ -27,18 +45,21 @@ func SaveSeriesData(prices []float64, cashSeries []float64, actions []int) error
 	defer writer.Flush()
 
 	// Write header
-	header := []string{"time", "price", "cash", "action"}
+	header := []string{"time", "price", "portfolio_value", "action", "action_name", "amount_bought", "amount_sold", "cash", "shares", "commission"}
 	if err := writer.Write(header); err != nil {
 		return fmt.Errorf("failed to write header: %w", err)
 	}
 
 	// Write data - ensure all arrays have the same length
 	maxLen := len(prices)
-	if len(cashSeries) > maxLen {
-		maxLen = len(cashSeries)
+	if len(portfolioSeries) > maxLen {
+		maxLen = len(portfolioSeries)
 	}
 	if len(actions) > maxLen {
 		maxLen = len(actions)
+	}
+	if len(actionData) > maxLen {
+		maxLen = len(actionData)
 	}
 
 	for i := 0; i < maxLen; i++ {
@@ -46,20 +67,41 @@ func SaveSeriesData(prices []float64, cashSeries []float64, actions []int) error
 		if i < len(prices) {
 			price = prices[i]
 		}
-		cash := 0.0
-		if i < len(cashSeries) {
-			cash = cashSeries[i]
+		portfolioValue := 0.0
+		if i < len(portfolioSeries) {
+			portfolioValue = portfolioSeries[i]
 		}
 		action := -1
 		if i < len(actions) {
 			action = actions[i]
 		}
 
+		actionName := ""
+		amountBought := 0.0
+		amountSold := 0.0
+		cash := 0.0
+		shares := 0.0
+		commission := 0.0
+		if i < len(actionData) {
+			actionName = actionData[i].ActionName
+			amountBought = actionData[i].AmountBought
+			amountSold = actionData[i].AmountSold
+			cash = actionData[i].Cash
+			shares = actionData[i].Shares
+			commission = actionData[i].Commission
+		}
+
 		record := []string{
 			strconv.Itoa(i),
 			strconv.FormatFloat(price, 'f', 6, 64),
-			strconv.FormatFloat(cash, 'f', 6, 64),
+			strconv.FormatFloat(portfolioValue, 'f', 6, 64),
 			strconv.Itoa(action),
+			actionName,
+			strconv.FormatFloat(amountBought, 'f', 6, 64),
+			strconv.FormatFloat(amountSold, 'f', 6, 64),
+			strconv.FormatFloat(cash, 'f', 6, 64),
+			strconv.FormatFloat(shares, 'f', 6, 64),
+			strconv.FormatFloat(commission, 'f', 6, 64),
 		}
 		if err := writer.Write(record); err != nil {
 			return fmt.Errorf("failed to write record: %w", err)
@@ -69,10 +111,10 @@ func SaveSeriesData(prices []float64, cashSeries []float64, actions []int) error
 	return writer.Error()
 }
 
-// SaveQMatrixData saves the Q-matrix to CSV in rl/plot/data directory.
+// SaveQMatrixData saves the Q-matrix to CSV in data directory.
 func SaveQMatrixData(Q [][]float64) error {
-	// Create rl/plot/data directory if it doesn't exist
-	dir := "rl/plot/data"
+	// Create data directory if it doesn't exist
+	dir := "data"
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create directory %s: %w", dir, err)
 	}
@@ -112,9 +154,57 @@ func SaveQMatrixData(Q [][]float64) error {
 	return writer.Error()
 }
 
-// LoadSeriesData loads series data from rl/plot/data/series.csv.
+// LoadQMatrixData loads the Q-matrix from data/q_matrix.csv.
+func LoadQMatrixData() ([][]float64, error) {
+	filepath := "data/q_matrix.csv"
+	file, err := os.Open(filepath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open file: %w", err)
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+	records, err := reader.ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read CSV: %w", err)
+	}
+
+	if len(records) < 2 {
+		return nil, fmt.Errorf("insufficient data in file")
+	}
+
+	// First row is header, determine number of actions from header
+	numActions := len(records[0]) - 1 // Subtract 1 for state column
+	if numActions <= 0 {
+		return nil, fmt.Errorf("invalid header format")
+	}
+
+	// Parse Q-matrix
+	var Q [][]float64
+	for i := 1; i < len(records); i++ {
+		if len(records[i]) < numActions+1 {
+			continue
+		}
+
+		row := make([]float64, numActions)
+		for j := 0; j < numActions; j++ {
+			val, err := strconv.ParseFloat(records[i][j+1], 64) // j+1 to skip state column
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse value at row %d, col %d: %w", i+1, j+1, err)
+			}
+			row[j] = val
+		}
+		Q = append(Q, row)
+	}
+
+	return Q, nil
+}
+
+// LoadSeriesData loads series data from data/series.csv.
+// Returns prices, portfolio values (cash + price * shares), and actions.
+// The new columns (action_name, amount_bought, amount_sold) are ignored for backward compatibility.
 func LoadSeriesData() ([]float64, []float64, []int, error) {
-	filepath := "rl/plot/data/series.csv"
+	filepath := "data/series.csv"
 	file, err := os.Open(filepath)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to open file: %w", err)
@@ -135,7 +225,7 @@ func LoadSeriesData() ([]float64, []float64, []int, error) {
 
 	// Skip header
 	var prices []float64
-	var cashSeries []float64
+	var portfolioSeries []float64
 	var actions []int
 
 	for i := 1; i < len(records); i++ {
@@ -147,7 +237,7 @@ func LoadSeriesData() ([]float64, []float64, []int, error) {
 		if err != nil {
 			continue
 		}
-		cash, err := strconv.ParseFloat(records[i][2], 64)
+		portfolioValue, err := strconv.ParseFloat(records[i][2], 64)
 		if err != nil {
 			continue
 		}
@@ -157,9 +247,9 @@ func LoadSeriesData() ([]float64, []float64, []int, error) {
 		}
 
 		prices = append(prices, price)
-		cashSeries = append(cashSeries, cash)
+		portfolioSeries = append(portfolioSeries, portfolioValue)
 		actions = append(actions, action)
 	}
 
-	return prices, cashSeries, actions, nil
+	return prices, portfolioSeries, actions, nil
 }
