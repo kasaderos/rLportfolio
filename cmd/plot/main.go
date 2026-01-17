@@ -72,6 +72,9 @@ func generateInteractivePlot(prices []float64, portfolioSeries []float64, action
 	// Prepare data for JavaScript
 	pricesJS := formatFloatArray(prices)
 
+	// Calculate moving averages
+	maDataJS := calculateMAsForPlot(prices)
+
 	// Prepare action markers with state information
 	actionMarkers := prepareActionMarkers(prices, portfolioSeries, actions)
 
@@ -123,6 +126,12 @@ func generateInteractivePlot(prices []float64, portfolioSeries []float64, action
             <h3>Legend:</h3>
             <ul>
                 <li><span style="color: #1f77b4;">Blue line:</span> Price series</li>
+                <li><span style="color: #ff7f0e;">Orange dashed:</span> MA10</li>
+                <li><span style="color: #9467bd;">Purple dashed:</span> MA20</li>
+                <li><span style="color: #8c564b;">Brown dashed:</span> MA30</li>
+                <li><span style="color: #e377c2;">Pink dashed:</span> MA40</li>
+                <li><span style="color: #7f7f7f;">Gray dashed:</span> MA50</li>
+                <li><span style="color: #bcbd22;">Olive dashed:</span> MA60</li>
                 <li><span style="color: #2ca02c;">Green markers:</span> Buy actions</li>
                 <li><span style="color: #d62728;">Red markers:</span> Sell actions</li>
             </ul>
@@ -133,6 +142,7 @@ func generateInteractivePlot(prices []float64, portfolioSeries []float64, action
         // Price data
         var prices = %s;
         var actionMarkers = %s;
+        var maData = %s;
         
         var time = [];
         for (var i = 0; i < prices.length; i++) {
@@ -152,6 +162,40 @@ func generateInteractivePlot(prices []float64, portfolioSeries []float64, action
             },
             yaxis: 'y'
         };
+
+        // Create MA traces
+        var maTraces = [];
+        var maColors = ['#ff7f0e', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22'];
+        var maPeriods = [10, 20, 30, 40, 50, 60];
+        
+        for (var i = 0; i < maPeriods.length; i++) {
+            var period = maPeriods[i];
+            var maValues = maData[period];
+            var maTime = [];
+            var maY = [];
+            
+            // MA arrays are shorter, need to offset x values
+            var offset = period - 1;
+            for (var j = 0; j < maValues.length; j++) {
+                maTime.push(offset + j);
+                maY.push(maValues[j]);
+            }
+            
+            maTraces.push({
+                x: maTime,
+                y: maY,
+                type: 'scatter',
+                mode: 'lines',
+                name: 'MA' + period,
+                line: {
+                    color: maColors[i],
+                    width: 1.5,
+                    dash: 'dash'
+                },
+                yaxis: 'y',
+                hovertemplate: 'MA' + period + '<br>Time: %%{x}<br>Value: %%{y:.2f}<extra></extra>'
+            });
+        }
 
         // Create buy action markers
         var buyMarkers = {
@@ -197,7 +241,7 @@ func generateInteractivePlot(prices []float64, portfolioSeries []float64, action
             customdata: actionMarkers.sell.states
         };
 
-        var data = [priceTrace, buyMarkers, sellMarkers];
+        var data = [priceTrace].concat(maTraces).concat([buyMarkers, sellMarkers]);
 
         var layout = {
             title: {
@@ -237,7 +281,7 @@ func generateInteractivePlot(prices []float64, portfolioSeries []float64, action
         Plotly.newPlot('plot', data, layout, config);
     </script>
 </body>
-</html>`, pricesJS, actionMarkers)
+</html>`, pricesJS, actionMarkers, maDataJS)
 }
 
 func formatFloatArray(arr []float64) string {
@@ -388,5 +432,24 @@ func formatStringArray(arr []string) string {
 		result += fmt.Sprintf(`"%s"`, v)
 	}
 	result += "]"
+	return result
+}
+
+// calculateMAsForPlot calculates all moving averages for plotting.
+func calculateMAsForPlot(prices []float64) string {
+	mas := ma.CalculateAllMAs(prices)
+
+	// Format as JavaScript object
+	result := "{"
+	first := true
+	for _, period := range ma.MAPeriods {
+		if !first {
+			result += ","
+		}
+		first = false
+		maValues := mas[period]
+		result += fmt.Sprintf(`"%d":%s`, period, formatFloatArray(maValues))
+	}
+	result += "}"
 	return result
 }
