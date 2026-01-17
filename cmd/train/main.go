@@ -102,7 +102,7 @@ func main() {
 			InitialCash: 10000.0,
 			ApproxM:     approxM,
 			ApproxN:     approxN,
-			MinStartIdx: 20,
+			MinStartIdx: 120, // Need at least 120 for MA120
 			Commission:  0.002,
 		})
 
@@ -136,7 +136,7 @@ func main() {
 			InitialCash: 10000.0,
 			ApproxM:     approxM,
 			ApproxN:     approxN,
-			MinStartIdx: 20,
+			MinStartIdx: 120, // Need at least 120 for MA120
 			Commission:  0.002,
 		})
 

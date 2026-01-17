@@ -57,8 +57,8 @@ func NewMarketEnv(config MarketConfig) *MarketEnv {
 	// Calculate returns (still used for other purposes if needed)
 	returns := simpleReturns(config.Prices)
 
-	// Determine start index (need at least 60 prices for all MAs to be available)
-	startIdx := 60 // Need MA60 which requires 60 prices
+	// Determine start index (need at least 120 prices for all MAs to be available)
+	startIdx := 120 // Need MA120 which requires 120 prices
 	if startIdx < config.MinStartIdx {
 		startIdx = config.MinStartIdx
 	}
@@ -122,20 +122,23 @@ func (e *MarketEnv) Step(action agent.Action) (next state.State, reward float64,
 	return next, reward, done
 }
 
-// getState computes the current state using moving average ordering and portfolio position.
+// getState computes the current state using moving average ordering, convergence/divergence, and portfolio position.
 func (e *MarketEnv) getState() state.State {
 	if e.currentIdx < e.startIdx || e.currentIdx >= len(e.prices) {
 		// Return a default state if we don't have enough data
-		return state.NewState(0, 0, 0)
+		return state.NewState(0, 1, 0, 0) // Neutral divergence
 	}
 
-	// Need at least 60 prices for all MAs to be available
-	if e.currentIdx < 60 {
-		return state.NewState(0, 0, 0)
+	// Need at least 120 prices for all MAs to be available
+	if e.currentIdx < 120 {
+		return state.NewState(0, 1, 0, 0) // Neutral divergence
 	}
 
 	// Get moving average ordering state
 	maState := ma.GetMAStateForIndex(e.prices, e.currentIdx)
+
+	// Get MA convergence/divergence state
+	maDivergence := ma.GetMADivergenceState(e.prices, e.currentIdx)
 
 	// Get portfolio position categories
 	currentPrice := e.prices[e.currentIdx]
@@ -144,7 +147,7 @@ func (e *MarketEnv) getState() state.State {
 	cashCat := state.GetCashCategory(e.cash, portfolioValue)
 	sharesCat := state.GetSharesCategory(sharesValue, portfolioValue)
 
-	return state.NewState(maState, cashCat, sharesCat)
+	return state.NewState(maState, maDivergence, cashCat, sharesCat)
 }
 
 // executeAction executes the action and updates cash and shares.

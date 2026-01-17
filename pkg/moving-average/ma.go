@@ -6,18 +6,28 @@ import (
 )
 
 // MAPeriods defines the moving average periods to use.
-var MAPeriods = []int{10, 20, 30, 40, 50, 60}
+var MAPeriods = []int{5, 10, 20, 40, 80, 120}
 
 const (
-	// MA10, MA20, MA30, MA40, MA50, MA60 represent the moving average indices
-	MA10  = 1
-	MA20  = 2
-	MA30  = 3
+	// MA5, MA10, MA20, MA40, MA80, MA120 represent the moving average indices
+	MA5   = 1
+	MA10  = 2
+	MA20  = 3
 	MA40  = 4
-	MA50  = 5
-	MA60  = 6
+	MA80  = 5
+	MA120 = 6
 	Price = 7 // Price is represented as 7 in the ordering
 )
+
+// periodToIndex maps period to index (1-6)
+var periodToIndex = map[int]int{
+	5:   MA5,
+	10:  MA10,
+	20:  MA20,
+	40:  MA40,
+	80:  MA80,
+	120: MA120,
+}
 
 // CalculateMA calculates a simple moving average for the given period.
 func CalculateMA(prices []float64, period int) []float64 {
@@ -37,7 +47,7 @@ func CalculateMA(prices []float64, period int) []float64 {
 	return ma
 }
 
-// CalculateAllMAs calculates all moving averages (10, 20, 30, 40, 50, 60) for the given prices.
+// CalculateAllMAs calculates all moving averages (5, 10, 20, 40, 80, 120) for the given prices.
 // Returns a map where keys are periods and values are MA arrays.
 // Note: Each MA array will have different lengths (shorter for longer periods).
 func CalculateAllMAs(prices []float64) map[int][]float64 {
@@ -56,8 +66,8 @@ type ValueWithIndex struct {
 
 // GetMAOrdering determines the vertical ordering of moving averages and current price.
 // Returns a slice representing the order from top (highest) to bottom (lowest).
-// Values: 1=MA10, 2=MA20, 3=MA30, 4=MA40, 5=MA50, 6=MA60, 7=Price
-// Always returns exactly 7 elements. Assumes idx >= 60 (all MAs available).
+// Values: 1=MA5, 2=MA10, 3=MA20, 4=MA40, 5=MA80, 6=MA120, 7=Price
+// Always returns exactly 7 elements. Assumes idx >= 120 (all MAs available).
 func GetMAOrdering(prices []float64, idx int) []int {
 	if idx < 0 || idx >= len(prices) {
 		return nil
@@ -69,7 +79,7 @@ func GetMAOrdering(prices []float64, idx int) []int {
 	values := make([]ValueWithIndex, 7)
 
 	// Calculate only the last MA value for each period (more efficient than calculating all MAs)
-	// Assumes idx >= 60, so all periods have enough data
+	// Assumes idx >= 120, so all periods have enough data
 	for i, period := range MAPeriods {
 		// Calculate MA value directly: sum of last 'period' prices
 		sum := 0.0
@@ -79,10 +89,10 @@ func GetMAOrdering(prices []float64, idx int) []int {
 		}
 		maValue := sum / float64(period)
 
-		// Map period to index: 10->1, 20->2, 30->3, 40->4, 50->5, 60->6
+		// Map period to index using the mapping
 		values[i] = ValueWithIndex{
 			Value: maValue,
-			Index: period / 10,
+			Index: periodToIndex[period],
 		}
 	}
 
@@ -113,7 +123,7 @@ func GetMAOrdering(prices []float64, idx int) []int {
 }
 
 // EncodeMAState encodes the MA ordering into a state index.
-// The ordering is a permutation of [1,2,3,4,5,6,7] representing MA10, MA20, MA30, MA40, MA50, MA60, Price.
+// The ordering is a permutation of [1,2,3,4,5,6,7] representing MA5, MA10, MA20, MA40, MA80, MA120, Price.
 // Returns a unique integer state index (0 to 5039, since 7! = 5040).
 func EncodeMAState(ordering []int) int {
 	if len(ordering) != 7 {
@@ -181,4 +191,86 @@ func GetMAStateForIndex(prices []float64, idx int) int {
 // This is 7! = 5040 (all permutations of 7 elements).
 func NumMAStates() int {
 	return 5040
+}
+
+// GetMADivergenceState determines if moving averages are converging or diverging.
+// Returns: 0 = converging, 1 = neutral, 2 = diverging
+// Compares the current spread of MAs to the spread at a previous point.
+func GetMADivergenceState(prices []float64, idx int) int {
+	if idx < 120 || idx < 10 {
+		return 1 // Neutral if not enough data
+	}
+
+	// Calculate current MA values
+	currentMAs := make([]float64, len(MAPeriods))
+	for i, period := range MAPeriods {
+		sum := 0.0
+		start := idx - period + 1
+		for j := start; j <= idx; j++ {
+			sum += prices[j]
+		}
+		currentMAs[i] = sum / float64(period)
+	}
+
+	// Calculate current spread (range: max - min)
+	currentMax := currentMAs[0]
+	currentMin := currentMAs[0]
+	for _, ma := range currentMAs {
+		if ma > currentMax {
+			currentMax = ma
+		}
+		if ma < currentMin {
+			currentMin = ma
+		}
+	}
+	currentSpread := currentMax - currentMin
+
+	// Calculate previous spread (10 periods ago, but ensure we have enough data)
+	prevIdx := idx - 10
+	if prevIdx < 120 {
+		// If we can't go back 10 periods, use the earliest valid point (120)
+		// In this case, we'll return neutral since we can't make a comparison
+		if idx == 120 {
+			return 1 // Neutral - can't compare yet
+		}
+		prevIdx = 120
+	}
+
+	prevMAs := make([]float64, len(MAPeriods))
+	for i, period := range MAPeriods {
+		sum := 0.0
+		start := prevIdx - period + 1
+		if start < 0 {
+			start = 0
+		}
+		for j := start; j <= prevIdx; j++ {
+			sum += prices[j]
+		}
+		prevMAs[i] = sum / float64(period)
+	}
+
+	prevMax := prevMAs[0]
+	prevMin := prevMAs[0]
+	for _, ma := range prevMAs {
+		if ma > prevMax {
+			prevMax = ma
+		}
+		if ma < prevMin {
+			prevMin = ma
+		}
+	}
+	prevSpread := prevMax - prevMin
+
+	// Determine convergence/divergence
+	// Use a threshold to avoid noise (1% of average price)
+	avgPrice := (currentMax + currentMin) / 2.0
+	threshold := avgPrice * 0.01
+
+	spreadChange := currentSpread - prevSpread
+	if spreadChange < -threshold {
+		return 0 // Converging (spread decreased)
+	} else if spreadChange > threshold {
+		return 2 // Diverging (spread increased)
+	}
+	return 1 // Neutral (spread stable)
 }

@@ -15,7 +15,7 @@ import (
 
 const (
 	// Moving average parameters (must match training parameters)
-	minStartIdx = 60 // Need at least 60 prices for MA60
+	minStartIdx = 120 // Need at least 120 prices for MA120
 )
 
 func main() {
@@ -126,12 +126,12 @@ func generateInteractivePlot(prices []float64, portfolioSeries []float64, action
             <h3>Legend:</h3>
             <ul>
                 <li><span style="color: #1f77b4;">Blue line:</span> Price series</li>
-                <li><span style="color: #ff7f0e;">Orange dashed:</span> MA10</li>
-                <li><span style="color: #9467bd;">Purple dashed:</span> MA20</li>
-                <li><span style="color: #8c564b;">Brown dashed:</span> MA30</li>
+                <li><span style="color: #ff7f0e;">Orange dashed:</span> MA5</li>
+                <li><span style="color: #9467bd;">Purple dashed:</span> MA10</li>
+                <li><span style="color: #8c564b;">Brown dashed:</span> MA20</li>
                 <li><span style="color: #e377c2;">Pink dashed:</span> MA40</li>
-                <li><span style="color: #7f7f7f;">Gray dashed:</span> MA50</li>
-                <li><span style="color: #bcbd22;">Olive dashed:</span> MA60</li>
+                <li><span style="color: #7f7f7f;">Gray dashed:</span> MA80</li>
+                <li><span style="color: #bcbd22;">Olive dashed:</span> MA120</li>
                 <li><span style="color: #2ca02c;">Green markers:</span> Buy actions</li>
                 <li><span style="color: #d62728;">Red markers:</span> Sell actions</li>
             </ul>
@@ -166,7 +166,7 @@ func generateInteractivePlot(prices []float64, portfolioSeries []float64, action
         // Create MA traces
         var maTraces = [];
         var maColors = ['#ff7f0e', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22'];
-        var maPeriods = [10, 20, 30, 40, 50, 60];
+        var maPeriods = [5, 10, 20, 40, 80, 120];
         
         for (var i = 0; i < maPeriods.length; i++) {
             var period = maPeriods[i];
@@ -366,8 +366,8 @@ func computeStateString(prices []float64, portfolioSeries []float64, idx int) st
 		return "N/A"
 	}
 
-	// Need at least 60 prices for all MAs to be available
-	if idx < 60 {
+	// Need at least 120 prices for all MAs to be available
+	if idx < 120 {
 		return "N/A"
 	}
 
@@ -375,6 +375,18 @@ func computeStateString(prices []float64, portfolioSeries []float64, idx int) st
 	maState := ma.GetMAStateForIndex(prices, idx)
 	if maState < 0 {
 		return "N/A"
+	}
+
+	// Get MA convergence/divergence state
+	maDivergence := ma.GetMADivergenceState(prices, idx)
+	divergenceStr := "N"
+	switch maDivergence {
+	case 0:
+		divergenceStr = "C" // Converging
+	case 1:
+		divergenceStr = "N" // Neutral
+	case 2:
+		divergenceStr = "D" // Diverging
 	}
 
 	// Get portfolio position categories
@@ -401,8 +413,8 @@ func computeStateString(prices []float64, portfolioSeries []float64, idx int) st
 	cashCat := state.GetCashCategory(estimatedCash, portfolioValue)
 	sharesCat := state.GetSharesCategory(estimatedSharesValue, portfolioValue)
 
-	return fmt.Sprintf("MA:%d C:%d S:%d",
-		maState, cashCat, sharesCat)
+	return fmt.Sprintf("MA:%d %s C:%d S:%d",
+		maState, divergenceStr, cashCat, sharesCat)
 }
 
 func formatIntArray(arr []int) string {
