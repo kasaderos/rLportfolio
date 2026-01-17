@@ -209,20 +209,20 @@ func loadTestPricesFromCSV(filename string) ([]float64, error) {
 	}
 
 	// GSPC is in column index 4 (5th column)
-	gspcColIdx := 4
-	if len(records[0]) <= gspcColIdx {
+	colIds := 0
+	if len(records[0]) <= colIds {
 		return nil, fmt.Errorf("CSV file must have at least 5 columns")
 	}
 
 	// Skip header row, start from index 1
 	prices := make([]float64, 0, len(records)-1)
 	for i := 1; i < len(records); i++ {
-		if len(records[i]) <= gspcColIdx {
+		if len(records[i]) <= colIds {
 			continue // Skip rows with insufficient columns
 		}
 
 		// Get GSPC price (index 4)
-		priceStr := records[i][gspcColIdx]
+		priceStr := records[i][colIds]
 		// Remove commas and quotes from the price string
 		priceStr = strings.ReplaceAll(priceStr, ",", "")
 		priceStr = strings.Trim(priceStr, `"`)
